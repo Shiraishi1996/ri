@@ -203,14 +203,14 @@
         color: leftAreaRate >= 8 ? "red" : "blue", // 条件に基づいて色を変更
         fillColor: leftAreaRate >= 8 ? "red" : "blue",
         fillOpacity: 0.5,
-        radius: leftAreaRate * 10
+        radius: leftAreaRate * 1
       }).bindPopup(`Left RI Area Rate: ${leftAreaRate.toFixed(2)}%`);
 
       const rightCircle = L.circle([rightCoords.latitude, rightCoords.longitude], {
         color: rightAreaRate >= 8 ? "red" : "blue", // 条件に基づいて色を変更
         fillColor: rightAreaRate >= 8 ? "red" : "blue",
         fillOpacity: 0.5,
-        radius: rightAreaRate * 10
+        radius: rightAreaRate * 1
       }).bindPopup(`Right RI Area Rate: ${rightAreaRate.toFixed(2)}%`);
 
       leftCircle.addTo(markersGroup);
