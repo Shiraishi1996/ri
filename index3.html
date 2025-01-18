@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RI Map Logging</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #map {
+      width: 100%;
+      height: 400px;
+      margin-top: 20px;
+    }
+    video, canvas {
+      width: 100%;
+      max-width: 400px;
+      margin: 10px 0;
+    }
+    #info {
+      margin: 10px;
+      text-align: center;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>RI Map Logging</h1>
+  <video id="video" autoplay></video>
+  <canvas id="canvas" style="display: none;"></canvas>
+  <div id="info">
+    <p><b>Right RI Area Rate:</b> <span id="right-rate">N/A</span>%</p>
+    <p><b>Left RI Area Rate:</b> <span id="left-rate">N/A</span>%</p>
+  </div>
+  <button id="start">Start Calculation</button>
+  <button id="download">Download CSV</button>
+  <div id="map"></div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const rightRateDisplay = document.getElementById('right-rate');
+    const leftRateDisplay = document.getElementById('left-rate');
+    const startButton = document.getElementById('start');
+    const downloadButton = document.getElementById('download');
+    const map = L.map('map').setView([0, 0], 2);
+    const markersGroup = L.layerGroup().addTo(map);
+
+    let intervalId = null;
+    let currentLocation = { latitude: 0, longitude: 0 };
+    let heading = 0; // 方位角
+    let logData = [["Timestamp", "Latitude", "Longitude", "Right Latitude", "Right Longitude", "Left Latitude", "Left Longitude", "Right RI Area Rate", "Left RI Area Rate"]];
+
+    // 初期化：Leaflet地図
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+    }).addTo(map);
+
+    // カメラ映像の取得
+    async function startCamera(facingMode="environment") {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: {
+                    facingMode: { exact: facingMode }, // 外向き（バックカメラ）を指定
+                },
+            });
+            video.srcObject = stream;
+            video.play();
+        } catch (err) {
+            if(facingMode = "environment"){
+                console.log("Front Camera might be okay.")
+                startCamera("user");
+            }
+            console.error('Error accessing camera:', err);
+            alert('Failed to access the camera: ' + err.message);
+        }
+    }
+
+    // GPSデータの取得
+    function trackGPS() {
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(
+          (position) => {
+            currentLocation.latitude = position.coords.latitude;
+            currentLocation.longitude = position.coords.longitude;
+            map.setView([currentLocation.latitude, currentLocation.longitude], 15);
+          },
+          (err) => {
+            console.error('Error getting location:', err);
+          }
+        );
+      } else {
+        alert("Geolocation is not supported by this browser.");
+      }
+    }
+
+    // 方位角を取得
+    function trackHeading() {
+      if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', (event) => {
+          if (event.alpha !== null) {
+            heading = event.alpha;
+          }
+        });
+      } else {
+        alert("Device orientation is not supported.");
+      }
+    }
+
+    // 緯度経度の計算（左右45°、10m先）
+    function calculateOffsetCoordinates(lat, lon, angle, distance) {
+      const earthRadius = 6378137; // 地球の半径（m）
+      const rad = (deg) => (deg * Math.PI) / 180;
+      const deg = (rad) => (rad * 180) / Math.PI;
+
+      const latRad = rad(lat);
+      const lonRad = rad(lon);
+      const angleRad = rad(angle);
+
+      const newLatRad = Math.asin(
+        Math.sin(latRad) * Math.cos(distance / earthRadius) +
+          Math.cos(latRad) * Math.sin(distance / earthRadius) * Math.cos(angleRad)
+      );
+
+      const newLonRad =
+        lonRad +
+        Math.atan2(
+          Math.sin(angleRad) * Math.sin(distance / earthRadius) * Math.cos(latRad),
+          Math.cos(distance / earthRadius) - Math.sin(latRad) * Math.sin(newLatRad)
+        );
+
+      return { latitude: deg(newLatRad), longitude: deg(newLonRad) };
+    }
+
+    // RIを計算し、左右下部の面積率を求めて地図にプロット
+    function calculateRI() {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      // 映像をCanvasに描画
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const { width, height, data } = imageData;
+
+      let leftRI = 0, rightRI = 0, leftTotal = 0, rightTotal = 0;
+
+      // 下部領域のみ計算
+      for (let y = Math.floor(height / 2); y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const index = (y * width + x) * 4;
+          const r = data[index];
+          const g = data[index + 1];
+
+          // RIの計算
+          const ri = (r - g) / (r + g + 1e-5);
+          if (ri >= 0.154 && ri <= 0.232) { // 条件に合うピクセルをカウント
+            if (x < width / 2) {
+              leftRI++;
+            } else {
+              rightRI++;
+            }
+          }
+
+          // ピクセル総数をカウント
+          if (x < width / 2) {
+            leftTotal++;
+          } else {
+            rightTotal++;
+          }
+        }
+      }
+
+      // 面積率の計算
+      const leftAreaRate = (leftRI / leftTotal) * 100;
+      const rightAreaRate = (rightRI / rightTotal) * 100;
+
+      // 結果を表示
+      leftRateDisplay.textContent = leftAreaRate.toFixed(2);
+      rightRateDisplay.textContent = rightAreaRate.toFixed(2);
+
+      // 左右45°前方10mの緯度経度を計算
+      const rightCoords = calculateOffsetCoordinates(currentLocation.latitude, currentLocation.longitude, heading + 45, 10);
+      const leftCoords = calculateOffsetCoordinates(currentLocation.latitude, currentLocation.longitude, heading - 45, 10);
+
+      // 地図にプロット
+      const timestamp = new Date().toISOString();
+      const leftCircle = L.circle([leftCoords.latitude, leftCoords.longitude], {
+        color: leftAreaRate >= 8 ? "red" : "blue", // 条件に基づいて色を変更
+        fillColor: leftAreaRate >= 8 ? "red" : "blue",
+        fillOpacity: 0.5,
+        radius: leftAreaRate * 10
+      }).bindPopup(`Left RI Area Rate: ${leftAreaRate.toFixed(2)}%`);
+
+      const rightCircle = L.circle([rightCoords.latitude, rightCoords.longitude], {
+        color: rightAreaRate >= 8 ? "red" : "blue", // 条件に基づいて色を変更
+        fillColor: rightAreaRate >= 8 ? "red" : "blue",
+        fillOpacity: 0.5,
+        radius: rightAreaRate * 10
+      }).bindPopup(`Right RI Area Rate: ${rightAreaRate.toFixed(2)}%`);
+
+      leftCircle.addTo(markersGroup);
+      rightCircle.addTo(markersGroup);
+
+      // ログデータを記録
+      logData.push([
+        timestamp,
+        currentLocation.latitude.toFixed(6),
+        currentLocation.longitude.toFixed(6),
+        rightCoords.latitude.toFixed(6),
+        rightCoords.longitude.toFixed(6),
+        leftCoords.latitude.toFixed(6),
+        leftCoords.longitude.toFixed(6),
+        rightAreaRate.toFixed(2),
+        leftAreaRate.toFixed(2),
+      ]);
+    }
+
+    // CSVのダウンロード
+    function downloadCSV() {
+      const csvContent = logData.map(row => row.join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ri_log.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // イベントリスナー
+    startButton.addEventListener('click', () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+        startButton.textContent = 'Start Calculation';
+      } else {
+        intervalId = setInterval(calculateRI, 3000); // 3秒ごとに計算
+        startButton.textContent = 'Stop Calculation';
+      }
+    });
+
+    downloadButton.addEventListener('click', downloadCSV);
+
+    // カメラとGPSの開始
+    startCamera();
+    trackGPS();
+    trackHeading();
+  </script>
+</body>
+</html>
