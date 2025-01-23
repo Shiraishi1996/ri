@@ -193,9 +193,9 @@
       leftRateDisplay.textContent = leftAreaRate.toFixed(2);
       rightRateDisplay.textContent = rightAreaRate.toFixed(2);
 
-      // 左右45°前方10mの緯度経度を計算
-      const rightCoords = calculateOffsetCoordinates(currentLocation.latitude, currentLocation.longitude, heading + 45, 10);
-      const leftCoords = calculateOffsetCoordinates(currentLocation.latitude, currentLocation.longitude, heading - 45, 10);
+      // 左右45°前方2mの緯度経度を計算
+      const rightCoords = calculateOffsetCoordinates(currentLocation.latitude, currentLocation.longitude, heading + 45, 2);
+      const leftCoords = calculateOffsetCoordinates(currentLocation.latitude, currentLocation.longitude, heading - 45, 2);
 
       // 地図にプロット
       const timestamp = new Date().toISOString();
@@ -240,8 +240,22 @@
       a.download = "ri_log.json";
       a.click();
       URL.revokeObjectURL(url);
+      //JSONの自動サーバダウンロード
+    }
+    function saveJSONToServer() {
+      const jsonContent = JSON.stringify(logData, null, 2);
+      fetch('/save-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: jsonContent
+      })
+      .then(response => response.json())
+      .then(data => console.log("JSON saved to server:", data))
+      .catch(err => console.error("Error saving JSON:", err));
     }
 
+// 定期実行
+setInterval(saveJSONToServer, 300000); // 5分ごとにサーバー保存
     // イベントリスナー
     startButton.addEventListener('click', () => {
       if (intervalId) {
