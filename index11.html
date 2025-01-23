@@ -219,14 +219,15 @@
       // ログデータを記録
       logData.push({
         timestamp,
-        currentLatitude: currentLocation.latitude.toFixed(6),
-        currentLongitude: currentLocation.longitude.toFixed(6),
-        rightLatitude: rightCoords.latitude.toFixed(6),
-        rightLongitude: rightCoords.longitude.toFixed(6),
-        leftLatitude: leftCoords.latitude.toFixed(6),
-        leftLongitude: leftCoords.longitude.toFixed(6),
-        rightAreaRate: rightAreaRate.toFixed(2),
-        leftAreaRate: leftAreaRate.toFixed(2),
+        current_Latitude: rightCoords.latitude.toFixed(6),
+        current_Longitude: rightCoords.longitude.toFixed(6),
+        AreaRate: rightAreaRate.toFixed(2),
+      });
+        logData.push({
+        timestamp,
+        current_Latitude: leftCoords.latitude.toFixed(6),
+        current_Longitude: leftCoords.longitude.toFixed(6),
+        AreaRate: leftAreaRate.toFixed(2),
       });
     }
 
