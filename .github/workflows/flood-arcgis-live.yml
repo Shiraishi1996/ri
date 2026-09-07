@@ -3,12 +3,13 @@ name: Publish flood GeoJSON for ArcGIS
 on:
   workflow_dispatch:
   schedule:
-    # Check every 5 minutes at off-peak offsets. The feed target remains <=10 minutes old.
+    # Primary scheduler: check every 5 minutes. Regenerate once the feed is 8+ minutes old.
     - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
   push:
     branches: [main]
     paths:
       - ".github/workflows/flood-arcgis-live.yml"
+      - ".github/workflows/flood-arcgis-watchdog.yml"
 
 permissions:
   contents: write
@@ -48,7 +49,6 @@ jobs:
             const t = Date.parse(s.generated_at || '');
             const ageMin = Number.isFinite(t) ? (Date.now() - t) / 60000 : 9999;
             console.error(`current generated_at=${s.generated_at}; age=${ageMin.toFixed(1)} min`);
-            // A 5-minute scheduler is used as a watchdog. Skip only while the feed is safely <8 min old.
             console.log(`skip=${ageMin < 8 ? 'true' : 'false'}`);
           } catch (e) {
             console.error(`freshness check failed: ${e.message}; regenerate`);
@@ -121,8 +121,8 @@ jobs:
           cp /tmp/status.json ./status.json
           cat > README.md <<'EOF'
           # Flood JP live ArcGIS feed
-          The scheduler checks freshness every 5 minutes and regenerates when the feed is about 8 minutes old or older.
-          The operational target is to keep the GeoJSON no more than about 10 minutes old.
+          Primary scheduler checks every 5 minutes and regenerates when the feed is 8+ minutes old.
+          A second watchdog workflow independently checks staleness and dispatches this workflow when the feed is 10+ minutes old.
           ArcGIS should reference the raw flood_5km.geojson URL and refresh every 10 minutes.
           EOF
           git add flood_5km.geojson status.json README.md
@@ -131,4 +131,4 @@ jobs:
 
       - name: Fresh feed - no regeneration needed
         if: steps.freshness.outputs.skip == 'true'
-        run: echo "Current GeoJSON is younger than 8 minutes; watchdog run completed without regeneration."
+        run: echo "Current GeoJSON is younger than 8 minutes; primary scheduler run completed without regeneration."
