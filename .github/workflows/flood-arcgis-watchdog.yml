@@ -3,7 +3,9 @@ name: Flood ArcGIS stale-feed watchdog
 on:
   workflow_dispatch:
   schedule:
-    - cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
+    # Independent recovery check, five minutes after the primary 10-minute slot.
+    # Changing cron also reactivates schedules disabled after repository inactivity.
+    - cron: "7,17,27,37,47,57 * * * *"
 
 permissions:
   actions: write
@@ -28,8 +30,9 @@ jobs:
             const s = await r.json();
             const t = Date.parse(s.generated_at || '');
             const age = Number.isFinite(t) ? (Date.now() - t) / 60000 : 9999;
-            console.log(`generated_at=${s.generated_at}; age=${age.toFixed(1)} min`);
-            stale = age >= 10;
+            const count = Number(s.feature_count || 0);
+            console.log(`generated_at=${s.generated_at}; age=${age.toFixed(1)} min; features=${count}`);
+            stale = age >= 12 || count < 20000;
           } catch (e) {
             console.log(`status check failed: ${e.message}`);
             stale = true;
