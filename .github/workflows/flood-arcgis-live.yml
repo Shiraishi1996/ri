@@ -3,7 +3,8 @@ name: Publish flood GeoJSON for ArcGIS
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"
+    # Offset from round 10-minute boundaries to reduce GitHub Actions cron congestion.
+    - cron: "7,17,27,37,47,57 * * * *"
   push:
     branches: [main]
     paths:
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,14 +32,16 @@ jobs:
           npx playwright install chromium
       - name: Generate current GeoJSON from flood-jp
         run: |
-          node --input-type=module <<'NODE'
+          for attempt in 1 2; do
+            echo "generation attempt ${attempt}"
+            if node --input-type=module <<'NODE'
           import { chromium } from 'playwright';
           import { writeFile } from 'node:fs/promises';
           const browser = await chromium.launch({ headless: true });
           try {
             const page = await browser.newPage();
             await page.goto('https://flood-jp.netlify.app', { waitUntil: 'domcontentloaded', timeout: 120000 });
-            await page.waitForFunction(() => window.arcgisState?.().ready === true, null, { timeout: 300000, polling: 2000 });
+            await page.waitForFunction(() => window.arcgisState?.().ready === true, null, { timeout: 420000, polling: 2000 });
             const fc = await page.evaluate(() => window.arcgisBuildGeoJSON());
             if (!fc?.features?.length) throw new Error('GeoJSON features are empty');
             await writeFile('/tmp/flood_5km.geojson', JSON.stringify(fc));
@@ -46,13 +49,21 @@ jobs:
               generated_at: fc?.metadata?.generated_at || new Date().toISOString(),
               feature_count: fc.features.length,
               model_version: fc?.metadata?.model_version || 'unknown',
-              source: 'https://flood-jp.netlify.app'
+              source: 'https://flood-jp.netlify.app',
+              publisher: 'github-actions',
+              cadence_minutes: 10
             }));
             console.log(`generated ${fc.features.length} features`);
           } finally {
             await browser.close();
           }
           NODE
+            then
+              break
+            fi
+            if [ "$attempt" = "2" ]; then exit 1; fi
+            sleep 20
+          done
       - name: Publish latest-only data branch
         run: |
           git config user.name "github-actions[bot]"
@@ -63,7 +74,8 @@ jobs:
           cp /tmp/status.json ./status.json
           cat > README.md <<'EOF'
           # Flood JP live ArcGIS feed
-          This branch is overwritten every 10 minutes by GitHub Actions.
+          This branch is overwritten about every 10 minutes by GitHub Actions.
+          ArcGIS should reference the raw flood_5km.geojson URL and refresh every 10 minutes.
           EOF
           git add flood_5km.geojson status.json README.md
           git commit -m "Update live flood GeoJSON"
